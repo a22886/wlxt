@@ -1,0 +1,45 @@
+usage: wlxt <command> [<args>]
+
+Supported commands: 
+
+    help    - Show this help page.
+    
+    config  - Basic settings. Use 'wlxt config show' to see your config.
+              Takes arguments <key> <value>. You can also use 'wlxt config surnames'
+              to set your personal surnames (maybe abbreviations) for your courses.
+
+    kc      - List all courses with your surnames.
+
+    zy      - List all homework. Takes arguments <course_name> <mode> [-f].
+              List in format like 
+                    未交: <course_name>: <hw_number> title <deadline> <grade>
+              The course name can be its course id, its course name (both Chinese 
+              or English), or your surname; pass in - to list for all courses. 
+              Mode can only be an integer from 0 to 7, whose binary digits represent
+              showing homework that are *not handed in*, *not graded*, and *graded*
+              correspondingly. Use [-f] option to refresh the cache by force.
+
+    xzzy    - Download the attached file for given homework. 
+              Takes arguments <course_name> <hw_number> <dir> [-o]. <course_name> is
+              the same logic as in the last paragraph. <hw_number> also accepts - for
+              downloading all, so for example downloading any possible homework in the 
+              current directory you can use the command 'wlxt xzzy - - .' 
+              Use [-o] option to overwrite existing files with the same name.
+
+    ckzy    - View the homework instruction. Takes arguments <course_name> <hw_number>.
+              You can only specify one homework at a time, which means you cannot pass
+              - to <course_name>. This operation changes continuous angle brackets into
+              newlines (which should work most of the time), but does not escape the 
+              characters in html (e.g. &nbsp; for space).
+
+    tjzy    - Hand in homework. Takes arguments <course_name> <hw_number>.
+              You can only specify one homework at a time, which means you cannot pass
+              - to <course_name>. You cannot hand in a homework that is already graded.
+
+    wj      - List all course files. Takes arguments <course_name> [-f].
+              Use [-f] option to refresh the cache by force.
+
+    xzwj    - Download course files. Takes arguments <course_name> <dir> [-o].
+              Use [-o] option to overwrite existing files with the same name.
+
+For security reasons, the permission for any relevant file is set to rw-------.

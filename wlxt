@@ -1,0 +1,460 @@
+#!/bin/bash
+
+userDir="$PWD"
+dir=$(dirname "$0")
+
+Config="$dir/data/config"
+Cookie="$dir/data/cookie"
+CachedCourses="$dir/cache/courses"
+CachedHomework="$dir/cache/homework"
+CachedFiles="$dir/cache/files"
+Help="$dir/help"
+
+if [ ! "$1" ] || ([ "$1" == "help" ] && [ "$2" ]); then
+    echo "Use wlxt help."
+    exit 1
+elif [ "$1" == "help" ]; then
+    cat "$Help"
+    exit 0
+fi
+
+function getCookie(){
+    IFS=$'\t' read username password semester <<< $(cat "$Config" 2> /dev/null | jq -r '.["id"], .["password"], .["semester"] // empty' 2> /dev/null | tr '\n' '\t')
+
+    if [ ! $username ] || [ ! $password ] || [ ! $semester ]; then
+        echo -e "Please specify your identity.\n\nwlxt config id <your_student_id>\nwlxt config password <your_password>\nwlxt config semester <semester_id> (e.g. 2024-2025-2)\n"
+        exit 1
+    fi
+
+    if [ ! -f "$Cookie" ] || [ $(date +%s) -gt $(awk '$6=="XSRF-TOKEN"{print $5-120}' "$Cookie" ) ]; then
+        mkdir -p $(dirname "$Cookie")
+        echo "Please wait for a second..."
+        curl -s "https://id.tsinghua.edu.cn/do/off/ui/auth/login/post/bb5df85216504820be7bba2b0ae1535b/0?/login.do" -d i_user=$username -d i_pass=$password | sed -nE 's/^.*href="(.*)".*$/\1/p' | xargs curl -s | sed -nE 's/^.*window\.location="(.*)".*$/https:\/\/learn.tsinghua.edu.cn\1/p' | xargs curl -s -L -c "$Cookie" > /dev/null 2> /dev/null
+        if [ $? -ne 0 ]; then
+            echo "Your username or password is incorrect."
+            exit 1
+        fi
+    fi
+}
+
+function getCourse(){
+    getCookie
+    xsrf=$(awk '$6=="XSRF-TOKEN"{print $7}' "$Cookie" )
+    Courses=$(cat "$CachedCourses" 2> /dev/null | jq -c '. // empty' 2> /dev/null)
+    if [ ! "$Courses" ]; then
+        mkdir -p $(dirname "$CachedCourses")
+        echo "Getting courses..."
+        curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadCourseBySemesterId/'$semester'/zh?_csrf='$xsrf -b $Cookie | jq 'reduce .["resultList"][] as $x ({}; . + {($x["wlkcid"]):($x | {"kcm","ywkcm","jsm","sjddb"})})' > "$CachedCourses"
+        Courses=$(cat "$CachedCourses" | jq -c '. // empty')
+        # echo "$Courses"
+    else
+        echo "Warning: using cache for courses..."
+    fi
+
+    IFS=$'\t' read -a idlist <<< $(echo "$Courses" | jq -r 'keys[]' | tr '\n' '\t')
+
+    function findCourse(){
+        clist=()
+        if [ "$1" == "-" ]; then clist=("${idlist[@]}"); return; fi
+        for id in "${idlist[@]}"
+        do
+            if [ "$1" == $id ]; then clist[0]=$id; fi
+        done
+        if [ ${clist[0]} ]; then return; fi
+        i=0
+        for id in "${idlist[@]}"
+        do
+            kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
+            ywkcm=$(echo "$Courses" | jq -r '.["'$id'"]["ywkcm"]')
+            surname=$(cat "$Config" | jq -r '.["surnames"]["'$id'"] // empty')
+            if [ "$1" == "$kcm" ] || [ "$1" == "$ywkcm" ] || [ "$1" == "$surname" ]; then
+                clist[$i]=$id
+                i=$((i+1))
+            fi
+        done      
+        i=
+        if [ ! ${clist[0]} ]; then
+            echo "Invalid course (sur)name: "$1
+            exit 1
+        fi
+    }
+}
+
+function getHomework(){
+    status=(Wj Yjwg Ypg)
+    getCourse
+    Homework=$(cat "$CachedHomework" 2> /dev/null | jq -c '. // empty' 2> /dev/null)
+    if [ ! "$Homework" ] || [ $(echo "$Homework" | jq 'length') -ne ${#idlist[@]} ] || [ $(echo "$Homework" | jq '.[] | keys | select(["Wj","Yjwg","Ypg"] | contains(.) | not)') ] || [ "$CachedCourses" -nt "$CachedHomework" ]; then
+        echo "Getting homework..."
+        echo "{}" > "$CachedHomework"
+        for id in "${idlist[@]}"
+        do
+            for s in "${status[@]}"
+            do
+                getCookie
+                curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kczy/zy/student/zyList'$s'?_csrf='$xsrf -b "$Cookie" --data-raw 'aoData=%5B%7B%22name%22%3A%22wlkcid%22%2C%22value%22%3A%22'$id'%22%7D%5D' | jq -n --slurpfile hw "$CachedHomework" '$hw[0] | setpath(["'$id'","'$s'"]; [input["object"]["aaData"][] | {"wz","bt","jzsjStr","zyid","xszyid","cj"}])' > "$CachedHomework".temp && mv "$CachedHomework".temp "$CachedHomework"
+            done
+            cat "$CachedHomework" | jq 'map_values(map_values(sort_by(-.["wz"])))' > "$CachedHomework".temp && mv "$CachedHomework".temp "$CachedHomework"
+        done
+        Homework=$(cat "$CachedHomework" | jq -c '. // empty')
+    else
+        echo "Warning: using cache for homework..."
+    fi
+
+    function findHomework(){
+        # findHomework course stat
+        hlist=()
+        IFS=$'\t' read -a hlist <<< $(echo "$Homework" | jq -c '.["'$1'"]["'$2'"][]' | tr '\n' '\t')
+    }
+}
+
+function getFiles(){
+    getCourse
+    Files=$(cat "$CachedFiles" 2> /dev/null | jq -c '. // empty' 2> /dev/null)
+    if [ ! "$Files" ] || [ $(echo "$Files" | jq -c 'keys') != $(echo "$Courses" | jq -c 'keys') ]; then
+        echo "Getting course files..."
+        echo "{}" > "$CachedFiles"
+        for id in "${idlist[@]}"
+        do
+            getCookie
+            curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjflb/student/pageList?_csrf='$xsrf'&wlkcid='$id -b "$Cookie" | jq -n --slurpfile f "$CachedFiles" '$f[0] | setpath(["'$id'"]; [reduce input["object"]["rows"][] as $x ({}; setpath([$x["kjflid"]]; $x["bt"]))])' > "$CachedFiles".temp && mv "$CachedFiles".temp "$CachedFiles"
+        done
+
+        for id in "${idlist[@]}"
+        do
+            IFS=$'\t' read -a flidlist <<< $(cat "$CachedFiles" | jq -r '.["'$id'"][0] | keys[]' | tr '\n' '\t')
+            # echo "${flidlist[@]}"
+            for flid in "${flidlist[@]}"
+            do
+                getCookie
+                curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/kjxxb/'$id'/'$flid'?_csrf='$xsrf -b "$Cookie" | jq -n --slurpfile f "$CachedFiles" '$f[0] | setpath(["'$id'",1,"'$flid'"]; [input["object"][] | {"kjxxid":.[0], "bt":.[1], "wjid":.[7], "wjlx":.[13]}])' > "$CachedFiles".temp && mv "$CachedFiles".temp "$CachedFiles"
+            done
+        done
+        Files=$(cat "$CachedFiles" | jq -c '. // empty')
+    else 
+        echo "Warning: using cache for course files..."
+    fi
+
+    function findFiles(){
+        # findFiles course flid
+        flist=()
+        IFS=$'\t' read -a flist <<< $(echo "$Files" | jq -c '.["'$1'"][1]["'$2'"][]' | tr '\n' '\t')
+    }
+}
+
+if [ "$1" == "config" ]; then
+    if [ "$2" == "show" ] && [ ! "$3" ]; then
+        echo -e "Warning: this operation only outputs the file $Config without caring about its contents.\nThe config file should contain the keys \"id\", \"password\", \"semester\".\nIt may contain your surnames for your courses."
+        if [ ! -f "$Config" ]; then
+            echo "Config file doesn't exist. Use wlxt config <key> <value>."
+            exit 1
+        fi
+        cat "$Config"
+    elif [ "$2" != "surnames" ]; then
+        if [ "$4" ] || [ ! "$3" ]; then
+            echo "Usage: wlxt config <key> <value>"
+            exit 1
+        fi
+        # check if $Config is a valid json object
+        cat "$Config" 2> /dev/null | jq '.[""]' > /dev/null 2> /dev/null
+        if [ $? != 0 ] || [ ! -f "$Config" ] ; then
+            mkdir -p $(dirname "$Config")
+            echo "{}" > "$Config"
+        fi
+        if [ "$2" != "id" ] && [ "$2" != "password" ] && [ "$2" != "semester" ]; then
+            echo -e "There are only four valid keys (for now): id, password, semester, surnames.\n\nThe first two corresponds to your account, the value for the third should be \nsomething like 2024-2025-2, and the fourth is set using wlxt config surnames.\n"
+            exit 1
+        fi
+        # jq cannot pipe into the original file like sed -i.
+        cat "$Config" | jq 'setpath(["'$2'"];"'$3'")' > "$Config".temp && mv "$Config".temp "$Config"
+        echo "Set your $2: $3"
+    else
+        if [ "$3" ]; then
+            echo "Use wlxt config surnames."
+            exit 1
+        fi
+        getCourse
+        echo -e "Enter nothing for no change, enter 'delete' to delete, enter 'stop' to stop.\nWarning: characters after a space will be ignored."
+        for id in "${idlist[@]}"
+        do
+            kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
+            echo -n "Please enter your surname for the course $kcm:"
+            read surname
+            surname=$(echo "$surname" | awk '{print $1}')
+            if [ "$surname" == "delete" ]; then
+                cat "$Config" | jq 'del(.["surnames"]["'$id'"])' > "$Config".temp && mv "$Config".temp "$Config"
+            elif [ "$surname" == "stop" ]; then
+                break
+            elif [ "$surname" ]; then
+                cat "$Config" | jq 'setpath(["surnames","'$id'"];"'$surname'")' > "$Config".temp && mv "$Config".temp "$Config"
+            fi
+            i=$((i+1))
+        done
+        cat "$Config" | jq -S '.' > "$Config".temp && mv "$Config".temp "$Config"
+    fi
+elif [ "$1" == "kc" ]; then
+    if [ "$2" ]; then
+        echo "Error: kc does not take any arguments."
+        exit 1
+    fi
+    rm -f "$CachedCourses"
+    getCourse
+    for id in "${idlist[@]}"
+    do
+        surname=$(cat "$Config" | jq -r '.["surnames"]["'$id'"]')
+        kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
+        # Chinese character formatting issues
+        fm=$((30-$(echo "$kcm" | wc -L)+$(echo "$kcm" | wc -c)))
+        printf "%-25s%-10s%-*s\n" $id $surname $fm "$kcm"
+    done
+elif [ "$1" == "zy" ]; then
+    if [ $# -lt 3 ] || [ $# -gt 4 ] || ([ "$4" ] && [ "$4" != "-f" ]); then 
+        echo "Usage: wlxt zy <mode> <course_name> [-f]"
+        exit 1
+    fi
+
+    if [ ! $(echo $3 | sed -n '/^[0-7]/p') ]; then
+        echo "Invalid mode: "$3
+        exit 1
+    fi
+    if [ "$4" == "-f" ]; then rm -f "$CachedCourses" "$CachedHomework"; fi
+
+    getHomework
+    findCourse "$2"
+
+    function printhw(){
+        findHomework "$1" "$2"
+        if [ ${#hlist[@]} -ne 0 ]; then 
+            msg=$(echo "$Courses" | jq -r '.["'$1'"]["kcm"]')":"
+            for hw in "${hlist[@]}"
+            do
+                fm=$((30-$(echo "$msg" | wc -L)+$(echo "$msg" | wc -c)))
+                IFS=$'\t' read wz bt jzsj cj <<< $(echo "$hw" | jq -r '.["wz"], .["bt"], .["jzsjStr"], .["cj"] //empty' | tr '\n' '\t')
+                fmbt=$((30-$(echo "$bt" | wc -L)+$(echo "$bt" | wc -c)))
+                printf "%-*s%-*s%2s %-*s%-20s%-2s\n" $fms "$statmsg" $fm "$msg" $wz $fmbt "$bt" "$jzsj" "$cj"
+                # output msg only on the first line
+                msg=
+                statmsg=
+                fms=10
+            done
+            echo ''
+        fi
+    }
+
+    if [ $(($3 & 4)) == 4 ]; then
+        statmsg="未交:"
+        fms=12
+        for id in "${clist[@]}"; do printhw $id "Wj"; done
+    fi
+    if [ $(($3 & 2)) == 2 ]; then
+        statmsg="已交未改:"
+        fms=14
+        for id in "${clist[@]}"; do printhw $id "Yjwg"; done
+    fi
+    if [ $(($3 & 1)) == 1 ]; then
+        statmsg="已批改:"
+        fms=13
+        for id in "${clist[@]}"; do printhw $id "Ypg"; done
+    fi
+elif [ "$1" == "xzzy" ]; then
+    if [ $# -lt 4 ] || [ $# -gt 5 ] || ([ "$5" ] && [ "$5" != "-o" ]); then 
+        echo "Usage: wlxt xzzy <course_name> <hw_number> <base_directory> [-o]"
+        exit 1
+    fi
+    getHomework
+    echo "To ensure correct behavior, use 'wlxt zy - 7 -f' before downloading."
+    findCourse "$2"
+    if [ $(echo "$4" | grep -e '^/') ]; then bdir="$4";
+    else bdir="$userDir/$4"; fi
+    echo "Base directory: "$bdir
+
+    function downloadhw(){
+        # downloadhw <course_id> <zyid> <xszyid> <dir> [-o]
+        if [ $# -lt 4 ] || [ $# -gt 5 ] || ([ "$5" ] && [ "$5" != "-o" ]); then return; fi
+        getCookie
+        read url name <<< $(curl -s "https://learn.tsinghua.edu.cn/f/wlxt/kczy/zy/student/viewTj?wlkcid=$1&zyid=$2&xszyid=$3&sfgq=0" -b $Cookie | sed -nE 's/^.*downloadUrl=(\/b\/wlxt\/[^"]*)".*>(.*)<\/a>.*$/https:\/\/learn.tsinghua.edu.cn\1 \2/p' | head)
+        if [ ! "$name" ] || [ $(echo '"'$url'"' | jq 'contains("'$username'")') == "true" ]; then
+            kcm=$(echo "$Courses" | jq -r '.["'$1'"]["kcm"]')
+            wz=$(echo "$Homework" | jq -r '.["'$1'"][][] | select(.["zyid"]=="'$2'") | .["wz"]')
+            echo "Homework number $wz of course $kcm does not have an attached file."
+        elif [ ! -f "$4/$name" ] || [ "$5" ]; then 
+            mkdir -p "$4" 2> /dev/null
+            if [ $? != 0 ]; then
+                echo "Making directory $4 failed."
+                exit 1
+            fi
+            echo "Downloading $4/$name..."
+            curl -s $url -b $Cookie > "$4/$name"
+        else
+            echo "File already exists: $4/$name"
+        fi
+    }
+
+    for id in "${clist[@]}"
+    do
+        kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
+        if [ "$3" != "-" ]; then
+            downloadhw $id $(echo "$Homework" | jq -r '.["'$id'"][][] | select(.["wz"]=='$3') | (.["zyid"], .["xszyid"])' 2> /dev/null) "$bdir/$kcm" "$5"
+        else 
+            h=$(echo "$Homework" | jq -r '[.["'$id'"][][] | {"zyid","xszyid"}]')
+            l=$(echo "$h" | jq 'length')
+            for i in $(seq 0 $((l-1)))
+            do
+                downloadhw $id $(echo "$h" | jq -r '.['$i'][]') "$bdir/$kcm" "$5"
+            done
+        fi
+    done
+elif [ "$1" == "ckzy" ]; then
+    if [ $# != 3 ]; then 
+        echo "Usage: wlxt ckzy <course_name> <hw_number>"
+        exit 1
+    fi
+    getHomework
+    echo "To ensure correct behavior, use 'wlxt zy - 7 -f' before downloading."
+    findCourse "$2"
+    if [ ${#clist[@]} != 1 ]; then echo "You can only view one homework at a time."; fi
+    IFS=$'\t' read zyid xszyid <<< $(echo "$Homework" | jq -r '.["'$clist'"][][] | select(.["wz"]=='$3') | (.["zyid"], .["xszyid"])' 2> /dev/null | tr '\n' '\t')
+    if [ ! "$zyid" ]; then echo "Invalid homework number: "$3; exit 1; fi
+    Tmp="$dir"/temp
+    echo ''
+    getCookie
+    curl -s "https://learn.tsinghua.edu.cn/f/wlxt/kczy/zy/student/viewTj?wlkcid=$clist&zyid=$zyid&xszyid=$xszyid&sfgq=0" -b $Cookie > "$Tmp"
+    IFS=$'\t' read l r <<< $(cat "$Tmp" | awk '/<!--作业说明-->|<!--作业附件-->/{print NR}' | head -n2 | tr '\n' '\t')
+    cat "$Tmp" | sed -n "$(($l+3)),$(($r-1)) p" | sed -E 's/ *(<[^>]*> *)+/\n/g' | sed '/^\s*$/d'
+    rm -f "$Tmp"
+elif [ "$1" == "tjzy" ]; then
+    if [ $# != 3 ]; then
+        echo "Usage: wlxt tjzy <course_name> <hw_number>"
+        exit 1
+    fi
+    getHomework
+    echo "To ensure correct behavior, use 'wlxt zy - 7 -f' before handing in."
+    findCourse "$2"
+    if [ ${#clist[@]} -gt 1 ]; then
+        echo "Ambiguous name: it is highly improbable that two homeworks are the same."
+        echo "Please specify the homework you want to hand in."
+        exit 1
+    fi
+    IFS=$'\t' read xszyid cj <<< $(echo "$Homework" | jq -c -r '.["'$clist'"][][] | select(.["wz"]=='$3') | (.["xszyid"], .["cj"]) // empty' 2> /dev/null | tr '\n' '\t')
+    if [ ! $xszyid ] || [ $cj ]; then
+        echo "Invalid homework number: "$3
+        exit 1
+    fi
+
+    echo -n "Your homework text:"
+    read text
+
+    if [ $(echo "$text" | wc -m) -gt 501 ]; then
+        echo "Text too long: size limit 500 characters."
+        exit 1
+    fi
+
+    echo -n "Your homework file:"
+    read file
+
+    if [ ! -f "$file" ]; then
+        echo "File doesn't exist. Please do not use ~ to refer to your home directory."
+        exit 1
+    fi
+    if [ $(ls -l "$file" | awk '{print $5}') -gt 1073741824 ]; then
+        echo "File too large: size limit 1024 MB."
+        exit 1
+    fi
+
+    echo "Handing in homework $file..."
+    getCookie
+    echo $(curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kczy/zy/student/tjzy?_csrf='$xsrf -b $Cookie -F xszyid=$xszyid -F "zynr=$text" -F isDeleted=0 -F "fileupload=@$file" | jq -r '.["msg"]')
+elif [ "$1" == "wj" ]; then
+    if [ ! "$2" ] || [ "$4" ] || ([ "$3" ] && [ "$3" != "-f" ]); then
+        echo "Usage: wlxt wj <course_name> [-f]"
+        exit 1
+    fi
+    if [ "$3" == "-f" ]; then rm -f "$CachedCourses" "$CachedFiles"; fi
+    getFiles
+    findCourse "$2"
+
+    function printfiles(){
+        findFiles "$1" "$2"
+        if [ ${#flist[@]} -ne 0 ]; then 
+            flidmsg=$(echo "$Files" | jq -r '.["'$1'"][0]["'$2'"]')":"
+            for f in "${flist[@]}"
+            do
+                fmflid=$((15-$(echo "$flidmsg" | wc -L)+$(echo "$flidmsg" | wc -c)))
+                IFS=$'\t' read bt wjlx <<< $(echo "$f" | jq -r '.["bt"], .["wjlx"] //empty' | tr '\n' '\t')
+                fmbt=$((80-$(echo "$bt" | wc -L)+$(echo "$bt" | wc -c)))
+                printf "%-*s%-*s%-*s%-10s\n" $fm "$msg" $fmflid "$flidmsg" $fmbt "$bt" "$wjlx"
+                # output msg only on the first line
+                flidmsg=
+                msg=
+                fm=31
+            done
+            echo ''
+        fi
+    }
+
+    for id in "${clist[@]}"
+    do
+        msg=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')":"
+        fm=$((30-$(echo "$msg" | wc -L)+$(echo "$msg" | wc -c)))
+        IFS=$'\t' read -a flidlist <<< $(cat "$CachedFiles" | jq -r '.["'$id'"][0] | keys[]' | tr '\n' '\t')
+        for flid in "${flidlist[@]}"; do printfiles $id $flid; done
+    done
+elif [ "$1" == "xzwj" ]; then
+    if [ $# -lt 3 ] || [ $# -gt 4 ] || ([ "$4" ] && [ "$4" != "-o" ]); then 
+        echo "Usage: wlxt xzwj <course_name> <base_directory> [-o]"
+        exit 1
+    fi
+    getFiles
+    echo "To ensure correct behavior, use 'wlxt wj - -f' before downloading."
+    findCourse "$2"
+    if [ $(echo "$3" | grep -e '^/') ]; then bdir="$3";
+    else bdir="$userDir/$3"; fi
+    echo "Base directory: "$bdir
+
+    function downloadfile(){
+        # downloadfile <wjid> <name> <suffix> <dir> [-o]
+        name=$(echo "$2" | sed -E 's/ *$//g')".$3"
+        # echo "$4/$name"
+        if [ ! -f "$4/$name" ] || [ "$5" ]; then
+            mkdir -p "$4" 2> /dev/null
+            if [ $? != 0 ]; then
+                echo "Making directory $4 failed."
+                exit 1
+            fi
+            echo "Downloading $4/$name..."
+            getCookie
+            curl -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/downloadFile?sfgk=&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > "$4/$name"
+        else
+            echo "File already exists: $4/$name"
+        fi
+    }
+    
+    for id in "${clist[@]}"
+    do
+        kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
+        IFS=$'\t' read -a flidlist <<< $(cat "$CachedFiles" | jq -r '.["'$id'"][0] | keys[]' | tr '\n' '\t')
+        for flid in "${flidlist[@]}"
+        do
+            flm=$(echo "$Files" | jq -r '.["'$id'"][0]["'$flid'"]')
+            findFiles $id $flid
+            for f in "${flist[@]}"
+            do
+                IFS=$'\t' read wjid bt wjlx <<< $(echo "$f" | jq -r '.["wjid"], .["bt"], .["wjlx"]' | tr '\n' '\t')
+                downloadfile $wjid "$bt" $wjlx "$bdir/$kcm/$flm" "$4"
+            done
+        done
+    done
+else
+    echo "Subcommand not found."
+    exit 1
+fi
+
+function setperm(){
+    if [ -f "$1" ] && [ $(ls -l "$1" | awk '{print $1}') != "-rw-------" ]; then chmod 600 "$1"; fi
+}
+
+setperm "$Config"
+setperm "$Cookie"
+setperm "$CachedCourses"
+setperm "$CachedHomework"
+setperm "$CachedFiles"
