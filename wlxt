@@ -127,7 +127,7 @@ function getFiles(){
             for flid in "${flidlist[@]}"
             do
                 getCookie
-                curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/kjxxb/'$id'/'$flid'?_csrf='$xsrf -b "$Cookie" | jq -n --slurpfile f "$CachedFiles" '$f[0] | setpath(["'$id'",1,"'$flid'"]; [input["object"][] | {"kjxxid":.[0], "bt":.[1], "wjid":.[7], "wjlx":.[13]}])' > "$CachedFiles".temp && mv "$CachedFiles".temp "$CachedFiles"
+                curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/kjxxb/'$id'/'$flid'?_csrf='$xsrf -b "$Cookie" | jq -n --slurpfile f "$CachedFiles" '$f[0] | setpath(["'$id'",1,"'$flid'"]; [input["object"][] | {"kjxxid":.[0], "bt":.[1], "wjid":.[7], "wjlx":.[13], "stat":.[8]}])' > "$CachedFiles".temp && mv "$CachedFiles".temp "$CachedFiles"
             done
         done
         Files=$(cat "$CachedFiles" | jq -c '. // empty')
@@ -257,12 +257,12 @@ elif [ "$1" == "zy" ]; then
         for id in "${clist[@]}"; do printhw $id "Ypg"; done
     fi
 elif [ "$1" == "xzzy" ]; then
-    if [ $# -lt 4 ] || [ $# -gt 5 ] || ([ "$5" ] && [ "$5" != "-o" ]); then 
-        echo "Usage: wlxt xzzy <course_name> <hw_number> <base_directory> [-o]"
+    if [ $# != 4 ]; then 
+        echo "Usage: wlxt xzzy <course_name> <hw_number> <base_directory>"
         exit 1
     fi
     getHomework
-    echo "To ensure correct behavior, use 'wlxt zy - 7 -f' before downloading."
+    echo "To ensure correct behavior, use 'wlxt refresh' before downloading."
     findCourse "$2"
     if [ $(echo "$4" | grep -e '^/') ]; then bdir="$4";
     else bdir="$userDir/$4"; fi
@@ -273,6 +273,9 @@ elif [ "$1" == "xzzy" ]; then
         if [ $# -lt 4 ] || [ $# -gt 5 ] || ([ "$5" ] && [ "$5" != "-o" ]); then return; fi
         getCookie
         read url name <<< $(curl -s "https://learn.tsinghua.edu.cn/f/wlxt/kczy/zy/student/viewTj?wlkcid=$1&zyid=$2&xszyid=$3&sfgq=0" -b $Cookie | sed -nE 's/^.*downloadUrl=(\/b\/wlxt\/[^"]*)".*>(.*)<\/a>.*$/https:\/\/learn.tsinghua.edu.cn\1 \2/p' | head)
+        base=$(echo "$name" | awk -F'.' '{for(i=1;i<NF;i++)print $i}')
+        suf=$(echo "$name" | awk -F'.' '{print $NF}')
+        if [ "$suf" ]; then suf=".$suf"; fi
         if [ ! "$name" ] || [ $(echo '"'$url'"' | jq 'contains("'$username'")') == "true" ]; then
             kcm=$(echo "$Courses" | jq -r '.["'$1'"]["kcm"]')
             wz=$(echo "$Homework" | jq -r '.["'$1'"][][] | select(.["zyid"]=="'$2'") | .["wz"]')
@@ -286,7 +289,10 @@ elif [ "$1" == "xzzy" ]; then
             echo "Downloading $4/$name..."
             curl -s $url -b $Cookie > "$4/$name"
         else
-            echo "File already exists: $4/$name"
+            i=1
+            while [ -f "$4/$base($i)$suf" ]; do i=$((i+1)); done
+            echo "Downloading $4/$base($i)$suf..."
+            curl -s $url -b $Cookie > "$4/$base($i)$suf"
         fi
     }
 
@@ -310,7 +316,7 @@ elif [ "$1" == "ckzy" ]; then
         exit 1
     fi
     getHomework
-    echo "To ensure correct behavior, use 'wlxt zy - 7 -f' before downloading."
+    echo "To ensure correct behavior, use 'wlxt refresh' before viewing."
     findCourse "$2"
     if [ ${#clist[@]} != 1 ]; then echo "You can only view one homework at a time."; fi
     IFS=$'\t' read zyid xszyid <<< $(echo "$Homework" | jq -r '.["'$clist'"][][] | select(.["wz"]=='$3') | (.["zyid"], .["xszyid"])' 2> /dev/null | tr '\n' '\t')
@@ -328,7 +334,7 @@ elif [ "$1" == "tjzy" ]; then
         exit 1
     fi
     getHomework
-    echo "To ensure correct behavior, use 'wlxt zy - 7 -f' before handing in."
+    echo "To ensure correct behavior, use 'wlxt refresh' before handing in."
     findCourse "$2"
     if [ ${#clist[@]} -gt 1 ]; then
         echo "Ambiguous name: it is highly improbable that two homeworks are the same."
@@ -380,9 +386,10 @@ elif [ "$1" == "wj" ]; then
             for f in "${flist[@]}"
             do
                 fmflid=$((15-$(echo "$flidmsg" | wc -L)+$(echo "$flidmsg" | wc -c)))
-                IFS=$'\t' read bt wjlx <<< $(echo "$f" | jq -r '.["bt"], .["wjlx"] //empty' | tr '\n' '\t')
+                IFS=$'\t' read bt wjlx stat <<< $(echo "$f" | jq -r '.["bt"], .["wjlx"], .["stat"] //empty' | tr '\n' '\t')
+                if [ "$stat" == "1" ]; then ast=*; else ast=; fi
                 fmbt=$((80-$(echo "$bt" | wc -L)+$(echo "$bt" | wc -c)))
-                printf "%-*s%-*s%-*s%-10s\n" $fm "$msg" $fmflid "$flidmsg" $fmbt "$bt" "$wjlx"
+                printf "%-*s%-*s%-2s%-*s%-10s\n" $fm "$msg" $fmflid "$flidmsg" "$ast" $fmbt "$bt" "$wjlx"
                 # output msg only on the first line
                 flidmsg=
                 msg=
@@ -400,32 +407,38 @@ elif [ "$1" == "wj" ]; then
         for flid in "${flidlist[@]}"; do printfiles $id $flid; done
     done
 elif [ "$1" == "xzwj" ]; then
-    if [ $# -lt 3 ] || [ $# -gt 4 ] || ([ "$4" ] && [ "$4" != "-o" ]); then 
-        echo "Usage: wlxt xzwj <course_name> <base_directory> [-o]"
+    if [ $# -lt 3 ] || [ $# -gt 4 ] || ([ "$4" ] && [ "$4" != "-a" ]); then 
+        echo "Usage: wlxt xzwj <course_name> <base_directory> [-a]"
         exit 1
     fi
     getFiles
-    echo "To ensure correct behavior, use 'wlxt wj - -f' before downloading."
+    echo "To ensure correct behavior, use 'wlxt refresh' before downloading."
     findCourse "$2"
     if [ $(echo "$3" | grep -e '^/') ]; then bdir="$3";
     else bdir="$userDir/$3"; fi
     echo "Base directory: "$bdir
 
     function downloadfile(){
-        # downloadfile <wjid> <name> <suffix> <dir> [-o]
-        name=$(echo "$2" | sed -E 's/ *$//g')".$3"
+        # downloadfile <wjid> <name> <suffix> <dir>
+        name=$(echo "$2" | sed -E 's/ *$//g')
         # echo "$4/$name"
-        if [ ! -f "$4/$name" ] || [ "$5" ]; then
+        if [ ! -f "$4/$name.$3" ]; then
             mkdir -p "$4" 2> /dev/null
             if [ $? != 0 ]; then
                 echo "Making directory $4 failed."
                 exit 1
             fi
-            echo "Downloading $4/$name..."
+            echo "Downloading $4/$name.$3..."
             getCookie
-            curl -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/downloadFile?sfgk=&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > "$4/$name"
+            curl -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/downloadFile?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > "$4/$name.$3"
+            curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjfwb/student/savePlayRecord?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > /dev/null
         else
-            echo "File already exists: $4/$name"
+            i=1
+            while [ -f "$4/$name($i).$3" ]; do i=$((i+1)); done
+            echo "Downloading $4/$name($i).$3..."
+            getCookie
+            curl -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjfwb/student/downloadFile?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > "$4/$name($i).$3"
+            curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjfwb/student/savePlayRecord?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > /dev/null
         fi
     }
     
@@ -439,11 +452,28 @@ elif [ "$1" == "xzwj" ]; then
             findFiles $id $flid
             for f in "${flist[@]}"
             do
-                IFS=$'\t' read wjid bt wjlx <<< $(echo "$f" | jq -r '.["wjid"], .["bt"], .["wjlx"]' | tr '\n' '\t')
-                downloadfile $wjid "$bt" $wjlx "$bdir/$kcm/$flm" "$4"
+                IFS=$'\t' read wjid bt wjlx stat <<< $(echo "$f" | jq -r '.["wjid"], .["bt"], .["wjlx"], .["stat"]' | tr '\n' '\t')
+                if [ "$stat" == "1" ] || [ "$4" ]; then downloadfile $wjid "$bt" $wjlx "$bdir/$kcm/$flm"; fi
             done
         done
     done
+elif [ "$1" == "refresh" ]; then
+    if [ ! "$2" ]; then
+        rm -f "$CachedCourses" "$CachedHomework" "$CachedFiles"
+        echo "All caches deleted."
+    elif [ "$2" == "courses" ]; then
+        rm -f "$CachedCourses"
+        echo "Course cache deleted."
+    elif [ "$2" == "homework" ]; then
+        rm -f "$CachedHomework"
+        echo "Homework cache deleted."
+    elif [ "$2" == "files" ]; then
+        rm -f "$CachedFiles"
+        echo "File cache deleted."
+    else
+        echo "Invalid argument: $2"
+        exit 1
+    fi
 else
     echo "Subcommand not found."
     exit 1
