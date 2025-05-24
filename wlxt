@@ -269,30 +269,23 @@ elif [ "$1" == "xzzy" ]; then
     echo "Base directory: "$bdir
 
     function downloadhw(){
-        # downloadhw <course_id> <zyid> <xszyid> <dir> [-o]
-        if [ $# -lt 4 ] || [ $# -gt 5 ] || ([ "$5" ] && [ "$5" != "-o" ]); then return; fi
+        # downloadhw <course_id> <zyid> <xszyid> <dir>
+        if [ $# != 4 ]; then return 1; fi
         getCookie
-        read url name <<< $(curl -s "https://learn.tsinghua.edu.cn/f/wlxt/kczy/zy/student/viewTj?wlkcid=$1&zyid=$2&xszyid=$3&sfgq=0" -b $Cookie | sed -nE 's/^.*downloadUrl=(\/b\/wlxt\/[^"]*)".*>(.*)<\/a>.*$/https:\/\/learn.tsinghua.edu.cn\1 \2/p' | head)
-        base=$(echo "$name" | awk -F'.' '{for(i=1;i<NF;i++)print $i}')
-        suf=$(echo "$name" | awk -F'.' '{print $NF}')
-        if [ "$suf" ]; then suf=".$suf"; fi
-        if [ ! "$name" ] || [ $(echo '"'$url'"' | jq 'contains("'$username'")') == "true" ]; then
+        url=$(curl -s "https://learn.tsinghua.edu.cn/f/wlxt/kczy/zy/student/viewTj?wlkcid=$1&zyid=$2&xszyid=$3&sfgq=0" -b $Cookie | sed -nE 's/^.*downloadUrl=(\/b\/wlxt\/[^"]*)".*$/https:\/\/learn.tsinghua.edu.cn\1/p' | head -n 1)
+        if [ ! "$url" ] || [ $(echo '"'$url'"' | jq 'contains("'$username'")') == "true" ]; then
             kcm=$(echo "$Courses" | jq -r '.["'$1'"]["kcm"]')
             wz=$(echo "$Homework" | jq -r '.["'$1'"][][] | select(.["zyid"]=="'$2'") | .["wz"]')
             echo "Homework number $wz of course $kcm does not have an attached file."
-        elif [ ! -f "$4/$name" ] || [ "$5" ]; then 
+        else
             mkdir -p "$4" 2> /dev/null
             if [ $? != 0 ]; then
                 echo "Making directory $4 failed."
                 exit 1
             fi
-            echo "Downloading $4/$name..."
-            curl -s $url -b $Cookie > "$4/$name"
-        else
-            i=1
-            while [ -f "$4/$base($i)$suf" ]; do i=$((i+1)); done
-            echo "Downloading $4/$base($i)$suf..."
-            curl -s $url -b $Cookie > "$4/$base($i)$suf"
+            cd "$4"
+            curl -w 'Downloading '"$4"'/%{filename_effective}...\n' -s $url -b $Cookie -J -O
+            cd - > /dev/null
         fi
     }
 
@@ -300,13 +293,17 @@ elif [ "$1" == "xzzy" ]; then
     do
         kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
         if [ "$3" != "-" ]; then
-            downloadhw $id $(echo "$Homework" | jq -r '.["'$id'"][][] | select(.["wz"]=='$3') | (.["zyid"], .["xszyid"])' 2> /dev/null) "$bdir/$kcm" "$5"
+            downloadhw $id $(echo "$Homework" | jq -r '.["'$id'"][][] | select(.["wz"]=='$3') | (.["zyid"], .["xszyid"])' 2> /dev/null) "$bdir/$kcm"
+            if [ $? == 1 ]; then
+                echo "Invalid homework number: $3"
+                exit 1
+            fi
         else 
             h=$(echo "$Homework" | jq -r '[.["'$id'"][][] | {"zyid","xszyid"}]')
             l=$(echo "$h" | jq 'length')
             for i in $(seq 0 $((l-1)))
             do
-                downloadhw $id $(echo "$h" | jq -r '.['$i'][]') "$bdir/$kcm" "$5"
+                downloadhw $id $(echo "$h" | jq -r '.['$i'][]') "$bdir/$kcm"
             done
         fi
     done
@@ -419,27 +416,17 @@ elif [ "$1" == "xzwj" ]; then
     echo "Base directory: "$bdir
 
     function downloadfile(){
-        # downloadfile <wjid> <name> <suffix> <dir>
-        name=$(echo "$2" | sed -E 's/ *$//g')
-        # echo "$4/$name"
-        if [ ! -f "$4/$name.$3" ]; then
-            mkdir -p "$4" 2> /dev/null
-            if [ $? != 0 ]; then
-                echo "Making directory $4 failed."
-                exit 1
-            fi
-            echo "Downloading $4/$name.$3..."
-            getCookie
-            curl -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/downloadFile?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > "$4/$name.$3"
-            curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjfwb/student/savePlayRecord?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > /dev/null
-        else
-            i=1
-            while [ -f "$4/$name($i).$3" ]; do i=$((i+1)); done
-            echo "Downloading $4/$name($i).$3..."
-            getCookie
-            curl -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjfwb/student/downloadFile?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > "$4/$name($i).$3"
-            curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjfwb/student/savePlayRecord?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > /dev/null
+        # downloadfile <wjid> <dir>
+        mkdir -p "$2" 2>/dev/null
+        if [ $? != 0 ]; then 
+            echo "Making directory $2 failed."
+            exit 1
         fi
+        cd "$2"
+        getCookie
+        curl -w 'Downloading '"$2"'/%{filename_effective}...\n' -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/downloadFile?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" -J -O
+        curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjfwb/student/savePlayRecord?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > /dev/null
+        cd - > /dev/null
     }
     
     for id in "${clist[@]}"
@@ -452,8 +439,8 @@ elif [ "$1" == "xzwj" ]; then
             findFiles $id $flid
             for f in "${flist[@]}"
             do
-                IFS=$'\t' read wjid bt wjlx stat <<< $(echo "$f" | jq -r '.["wjid"], .["bt"], .["wjlx"], .["stat"]' | tr '\n' '\t')
-                if [ "$stat" == "1" ] || [ "$4" ]; then downloadfile $wjid "$bt" $wjlx "$bdir/$kcm/$flm"; fi
+                IFS=$'\t' read wjid stat <<< $(echo "$f" | jq -r '.["wjid"], .["stat"]' | tr '\n' '\t')
+                if [ "$stat" == "1" ] || [ "$4" ]; then downloadfile $wjid "$bdir/$kcm/$flm"; fi
             done
         done
     done
