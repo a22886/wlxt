@@ -92,7 +92,7 @@ function getHomework(){
             for s in "${status[@]}"
             do
                 getCookie
-                curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kczy/zy/student/zyList'$s'?_csrf='$xsrf -b "$Cookie" --data-raw 'aoData=%5B%7B%22name%22%3A%22wlkcid%22%2C%22value%22%3A%22'$id'%22%7D%5D' | jq -n --slurpfile hw "$CachedHomework" '$hw[0] | setpath(["'$id'","'$s'"]; [input["object"]["aaData"][] | {"wz","bt","jzsjStr","zyid","xszyid","cj"}])' > "$CachedHomework".temp && mv "$CachedHomework".temp "$CachedHomework"
+                curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kczy/zy/student/zyList'$s'?_csrf='$xsrf -b "$Cookie" -d 'aoData=[{"name":"wlkcid","value":"'$id'"}]' | jq -n --slurpfile hw "$CachedHomework" '$hw[0] | setpath(["'$id'","'$s'"]; [input["object"]["aaData"][] | {"wz","bt","jzsjStr","zyid","xszyid","cj"}])' > "$CachedHomework".temp && mv "$CachedHomework".temp "$CachedHomework"
             done
             cat "$CachedHomework" | jq 'map_values(map_values(sort_by(-.["wz"])))' > "$CachedHomework".temp && mv "$CachedHomework".temp "$CachedHomework"
         done
@@ -152,7 +152,7 @@ if [ "$1" == "config" ]; then
         cat "$Config"
     elif [ "$2" != "surnames" ]; then
         if [ "$4" ] || [ ! "$3" ]; then
-            echo "Usage: wlxt config <key> <value>"
+            echo "Usage: wlxt config <key> <value>; wlxt config surnames; wlxt config show"
             exit 1
         fi
         # check if $Config is a valid json object
@@ -162,12 +162,17 @@ if [ "$1" == "config" ]; then
             echo "{}" > "$Config"
         fi
         if [ "$2" != "id" ] && [ "$2" != "password" ] && [ "$2" != "semester" ]; then
-            echo -e "There are only four valid keys (for now): id, password, semester, surnames.\n\nThe first two corresponds to your account, the value for the third should be \nsomething like 2024-2025-2, and the fourth is set using wlxt config surnames.\n"
+            echo -e "There are only four valid keys (for now): id, password, semester, surnames.\n\nThe first two corresponds to your account, the value for the third should be \nsomething like 2024-2025-2 (in which the last digit 1 for autumn, 2 for spring,\nand 3 for summer semesters), and the fourth is set using wlxt config surnames.\n"
+            exit 1
+        fi
+        if [ "$2" == "semester" ] && [ ! $(echo $3 | grep -E '^[0-9]{4}-[0-9]{4}-[1-3]$') ]; then
+            echo "Invalid semester: $3"
             exit 1
         fi
         # jq cannot pipe into the original file like sed -i.
         cat "$Config" | jq 'setpath(["'$2'"];"'$3'")' > "$Config".temp && mv "$Config".temp "$Config"
         echo "Set your $2: $3"
+        rm -f "$CachedCourses" "$CachedHomework" "$CachedFiles" "$Cookie"
     else
         if [ "$3" ]; then
             echo "Use wlxt config surnames."
@@ -209,7 +214,7 @@ elif [ "$1" == "kc" ]; then
     done
 elif [ "$1" == "zy" ]; then
     if [ $# -lt 3 ] || [ $# -gt 4 ] || ([ "$4" ] && [ "$4" != "-f" ]); then 
-        echo "Usage: wlxt zy <mode> <course_name> [-f]"
+        echo "Usage: wlxt zy <course_name> <mode> [-f]"
         exit 1
     fi
 
@@ -273,7 +278,7 @@ elif [ "$1" == "xzzy" ]; then
         if [ $# != 4 ]; then return 1; fi
         getCookie
         url=$(curl -s "https://learn.tsinghua.edu.cn/f/wlxt/kczy/zy/student/viewTj?wlkcid=$1&zyid=$2&xszyid=$3&sfgq=0" -b $Cookie | sed -nE 's/^.*downloadUrl=(\/b\/wlxt\/[^"]*)".*$/https:\/\/learn.tsinghua.edu.cn\1/p' | head -n 1)
-        if [ ! "$url" ] || [ $(echo '"'$url'"' | jq 'contains("'$username'")') == "true" ]; then
+        if [ ! "$url" ] || [ $(echo ${url:87:10}) == "$username" ]; then
             kcm=$(echo "$Courses" | jq -r '.["'$1'"]["kcm"]')
             wz=$(echo "$Homework" | jq -r '.["'$1'"][][] | select(.["zyid"]=="'$2'") | .["wz"]')
             echo "Homework number $wz of course $kcm does not have an attached file."
@@ -315,16 +320,17 @@ elif [ "$1" == "ckzy" ]; then
     getHomework
     echo "To ensure correct behavior, use 'wlxt refresh' before viewing."
     findCourse "$2"
-    if [ ${#clist[@]} != 1 ]; then echo "You can only view one homework at a time."; fi
+    if [ ${#clist[@]} != 1 ]; then echo "You can only view one homework at a time."; exit 1; fi
     IFS=$'\t' read zyid xszyid <<< $(echo "$Homework" | jq -r '.["'$clist'"][][] | select(.["wz"]=='$3') | (.["zyid"], .["xszyid"])' 2> /dev/null | tr '\n' '\t')
     if [ ! "$zyid" ]; then echo "Invalid homework number: "$3; exit 1; fi
     Tmp="$dir"/temp
-    echo ''
+    echo -e '\nInstructions:\n'
     getCookie
     curl -s "https://learn.tsinghua.edu.cn/f/wlxt/kczy/zy/student/viewTj?wlkcid=$clist&zyid=$zyid&xszyid=$xszyid&sfgq=0" -b $Cookie > "$Tmp"
     IFS=$'\t' read l r <<< $(cat "$Tmp" | awk '/<!--作业说明-->|<!--作业附件-->/{print NR}' | head -n2 | tr '\n' '\t')
-    cat "$Tmp" | sed -n "$(($l+3)),$(($r-1)) p" | sed -E 's/ *(<[^>]*> *)+/\n/g' | sed '/^\s*$/d'
+    cat "$Tmp" | sed -n "$(($l+4)),$(($r-3)) p" | tr '\n' ' ' | sed -E 's/ *(<[^>]*> *)+/\n/g' | python3 -c "import sys, html; print(html.unescape(sys.stdin.read()), end='')" | sed '/^\s*$/d'
     rm -f "$Tmp"
+    echo ''
 elif [ "$1" == "tjzy" ]; then
     if [ $# != 3 ]; then
         echo "Usage: wlxt tjzy <course_name> <hw_number>"
@@ -338,9 +344,10 @@ elif [ "$1" == "tjzy" ]; then
         echo "Please specify the homework you want to hand in."
         exit 1
     fi
-    IFS=$'\t' read xszyid cj <<< $(echo "$Homework" | jq -c -r '.["'$clist'"][][] | select(.["wz"]=='$3') | (.["xszyid"], .["cj"]) // empty' 2> /dev/null | tr '\n' '\t')
+    xszyid=$(echo "$Homework" | jq -c -r '.["'$clist'"] | (.["Wj"], .["Yjwg"]) | .[] | select(.["wz"]=='$3') | .["xszyid"] // empty' 2> /dev/null)
     if [ ! $xszyid ] || [ $cj ]; then
         echo "Invalid homework number: "$3
+        echo "Maybe it is already graded."
         exit 1
     fi
 
@@ -385,6 +392,7 @@ elif [ "$1" == "wj" ]; then
                 fmflid=$((15-$(echo "$flidmsg" | wc -L)+$(echo "$flidmsg" | wc -c)))
                 IFS=$'\t' read bt wjlx stat <<< $(echo "$f" | jq -r '.["bt"], .["wjlx"], .["stat"] //empty' | tr '\n' '\t')
                 if [ "$stat" == "1" ]; then ast=*; else ast=; fi
+                bt=$(echo "$bt" | python3 -c "import sys, html; print(html.unescape(sys.stdin.read()), end='')")
                 fmbt=$((80-$(echo "$bt" | wc -L)+$(echo "$bt" | wc -c)))
                 printf "%-*s%-*s%-2s%-*s%-10s\n" $fm "$msg" $fmflid "$flidmsg" "$ast" $fmbt "$bt" "$wjlx"
                 # output msg only on the first line
