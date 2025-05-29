@@ -14,16 +14,18 @@ Supported commands:
               List in format like 
                     未交: <course_name>: <hw_number> title <deadline> <grade>
               The course name can be its course id, its course name (both Chinese 
-              or English), or your surname; pass in - to list for all courses. 
+              or English), or your surname; supports regular expressions for surnames.
+              You have to quote the regular expressions to avoid shell automatically 
+              expanding wildcards like *.
               Mode can only be an integer from 0 to 7, whose binary digits represent
               showing homework that are *not handed in*, *not graded*, and *graded*
               correspondingly. Use [-f] option to refresh the cache by force.
 
     xzzy    - Download the attached file for given homework. 
               Takes arguments <course_name> <hw_number> <dir>. <course_name> is the 
-              same logic as in the last paragraph. <hw_number> also accepts - for
-              downloading all, so for example downloading any possible homework in the 
-              current directory you can use the command 'wlxt xzzy - - .' 
+              same logic as in the last paragraph. <hw_number> accepts - for downloading 
+              all, so for example downloading any possible homework in the current 
+              directory you can use the command 'wlxt xzzy ".*" - .' 
 
     ckzy    - View the homework instruction. Takes arguments <course_name> <hw_number>.
               You can only specify one homework at a time, which means you cannot pass
@@ -37,9 +39,10 @@ Supported commands:
     wj      - List all course files. Takes arguments <course_name> [-f].
               Use [-f] option to refresh the cache by force.
 
-    xzwj    - Download course files. Takes arguments <course_name> <dir> [-a].
-              The default behaviour is downloading all *new* files. Use [-a] option to
-              download all files. 
+    xzwj    - Download course files. Takes arguments <course_name> <dir> [title].
+              Here the title is the name listed in 'wlxt wj <course_name>'. If the 
+              title argument is not specified, then it will download all *new* files. 
+              The title argument also supports regular expressions.
 
     refresh - Deletes cache. Takes arguments 'courses', 'homework', 'files', or none.
 
