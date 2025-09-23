@@ -29,12 +29,12 @@ Supported commands:
 
     ckzy    - View the homework instruction. Takes arguments <course_name> <hw_number>.
               You can only specify one homework at a time, which means you cannot pass
-              - to <course_name>. This operation changes continuous angle brackets into
-              newlines (which should work most of the time).
+              .* to <course_name>. This operation changes continuous angle brackets into
+              newlines in the html file (which should work most of the time).
 
     tjzy    - Hand in homework. Takes arguments <course_name> <hw_number>.
               You can only specify one homework at a time, which means you cannot pass
-              - to <course_name>. You cannot hand in a homework that is already graded.
+              .* to <course_name>. You cannot hand in a homework that is already graded.
 
     wj      - List all course files. Takes arguments <course_name> [-f].
               Use [-f] option to refresh the cache by force.

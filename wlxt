@@ -3,6 +3,7 @@
 userDir="$PWD"
 dir=$(dirname "$0")
 
+JS="$dir/data/sm2Util.js"
 Config="$dir/data/config"
 Cookie="$dir/data/cookie"
 CachedCourses="$dir/cache/courses"
@@ -19,10 +20,15 @@ elif [ "$1" == "help" ]; then
 fi
 
 function getCookie(){
-    IFS=$'\t' read username password semester <<< $(cat "$Config" 2> /dev/null | jq -r '.["id"], .["password"], .["semester"] // empty' 2> /dev/null | tr '\n' '\t')
+    IFS=$'\t' read username password semester finger <<< $(cat "$Config" 2> /dev/null | jq -r '.["id"], .["password"], .["semester"], .["finger"] // empty' 2> /dev/null | tr '\n' '\t')
 
     if [ ! $username ] || [ ! $password ] || [ ! $semester ]; then
         echo -e "Please specify your identity.\n\nwlxt config id <your_student_id>\nwlxt config password <your_password>\nwlxt config semester <semester_id> (e.g. 2024-2025-2)\n"
+        exit 1
+    fi
+
+    if [ ! $finger ]; then
+        echo -e "You did not specify a fingerprint, i.e. not double authenticated.\nPlease copy a fingerprint somewhere else.\n\nwlxt config finger <fingerprint>\n"
         exit 1
     fi
     
@@ -32,11 +38,20 @@ function getCookie(){
     if [ ! -f "$Cookie" ] || [ $(date +%s) -gt $(awk '$6=="XSRF-TOKEN"{print $5-120}' "$Cookie" ) ]; then
         # mkdir -p $(dirname "$Cookie")
         echo "Please wait for a second..."
-        curl -s "https://id.tsinghua.edu.cn/do/off/ui/auth/login/post/bb5df85216504820be7bba2b0ae1535b/0?/login.do" -d i_user=$username -d i_pass=$password | sed -nE 's/^.*href="(.*)".*$/\1/p' | xargs curl -s | sed -nE 's/^.*window\.location="(.*)".*$/https:\/\/learn.tsinghua.edu.cn\1/p' | xargs curl -s -L -c "$Cookie" > /dev/null 2> /dev/null
+        # curl -s "https://id.tsinghua.edu.cn/do/off/ui/auth/login/post/bb5df85216504820be7bba2b0ae1535b/0?/login.do" -d i_user=$username -d i_pass=$password | sed -nE 's/^.*href="(.*)".*$/\1/p' | xargs curl -s | sed -nE 's/^.*window\.location="(.*)".*$/https:\/\/learn.tsinghua.edu.cn\1/p' | xargs curl -s -L -c "$Cookie" > /dev/null 2> /dev/null
+
+        # requires cookie for the next curl
+        curl -s 'https://id.tsinghua.edu.cn/do/off/ui/auth/login/form/bb5df85216504820be7bba2b0ae1535b/0'  -c "$Cookie".temp > /dev/null 2> /dev/null
+        # encrypt password
+        pass=$(node "$JS" "$password")
+        # fingerPrint needed for disguising as double authenticated
+        curl -s 'https://id.tsinghua.edu.cn/do/off/ui/auth/login/check' -b "$Cookie".temp -d i_user=$username -d i_pass=$pass -d fingerPrint=$finger | sed -nE 's/^.*href="(.*)".*$/\1/p' | xargs curl -L -c "$Cookie" > /dev/null 2> /dev/null
         if [ $? -ne 0 ]; then
             echo "Your username or password is incorrect."
+            rm "$Cookie".temp "$Cookie"
             exit 1
         fi
+        rm "$Cookie".temp
     fi
 }
 
@@ -146,7 +161,7 @@ function getFiles(){
 
 if [ "$1" == "config" ]; then
     if [ "$2" == "show" ] && [ ! "$3" ]; then
-        echo -e "Warning: this operation only outputs the file $Config without caring about its contents.\nThe config file should contain the keys \"id\", \"password\", \"semester\".\nIt may contain your surnames for your courses."
+        echo -e "Warning: this operation only outputs the file $Config without caring about its contents.\nThe config file should contain the keys \"finger\", \"id\", \"password\", \"semester\".\nIt may contain your surnames for your courses."
         if [ ! -f "$Config" ]; then
             echo "Config file doesn't exist. Use wlxt config <key> <value>."
             exit 1
@@ -163,8 +178,8 @@ if [ "$1" == "config" ]; then
             mkdir -p $(dirname "$Config")
             echo "{}" > "$Config"
         fi
-        if [ "$2" != "id" ] && [ "$2" != "password" ] && [ "$2" != "semester" ]; then
-            echo -e "There are only four valid keys (for now): id, password, semester, surnames.\n\nThe first two corresponds to your account, the value for the third should be \nsomething like 2024-2025-2 (in which the last digit 1 for autumn, 2 for spring,\nand 3 for summer semesters), and the fourth is set using wlxt config surnames.\n"
+        if [ "$2" != "id" ] && [ "$2" != "password" ] && [ "$2" != "semester" ] && [ "$2" != "finger" ]; then
+            echo -e "There are only five valid keys (for now): id, password, semester, finger, surnames.\n\nThe first two corresponds to your account, the value for the third should be something \nlike 2024-2025-2 (in which the last digit 1 for autumn, 2 for spring, and 3 for summer \nsemesters), the fourth for (disguising as) double authenticating. \n\nUse 'wlxt config surnames' to set the fifth."
             exit 1
         fi
         if [ "$2" == "semester" ] && [ ! $(echo $3 | grep -E '^[0-9]{4}-[0-9]{4}-[1-3]$') ]; then
@@ -182,6 +197,7 @@ if [ "$1" == "config" ]; then
         fi
         getCourse
         echo -e "Enter nothing for no change, enter 'delete' to delete, enter 'stop' to stop.\nWarning: characters after a space will be ignored."
+        # cat "$Config" | jq 'setpath(["surnames"];{})' > "$Config".temp && mv "$Config".temp "$Config"
         for id in "${idlist[@]}"
         do
             kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
@@ -480,6 +496,7 @@ function setperm(){
     if [ -f "$1" ] && [ $(ls -l "$1" | awk '{print $1}') != "-rw-------" ]; then chmod 600 "$1"; fi
 }
 
+setperm "$JS"
 setperm "$Config"
 setperm "$Cookie"
 setperm "$CachedCourses"
