@@ -3,7 +3,7 @@
 userDir="$PWD"
 dir=$(dirname "$0")
 
-JS="$dir/data/sm2Util.js"
+JS="$dir/sm2Util.js"
 Config="$dir/data/config"
 Cookie="$dir/data/cookie"
 CachedCourses="$dir/cache/courses"
@@ -450,7 +450,7 @@ elif [ "$1" == "xzwj" ]; then
         fi
         cd "$2"
         getCookie
-        curl -w 'Downloading '"$2"'/%{filename_effective}...\n' -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/downloadFile?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" -J -O
+        curl -w 'Downloaded '"$2"'/%{filename_effective}...\n' -s -L 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjxxb/student/downloadFile?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" -J -O
         curl -s 'https://learn.tsinghua.edu.cn/b/wlxt/kj/wlkc_kjfwb/student/savePlayRecord?sfgk=0&_csrf='$xsrf'&wjid='$1 -b "$Cookie" > /dev/null
         cd - > /dev/null
     }
@@ -466,7 +466,7 @@ elif [ "$1" == "xzwj" ]; then
             for f in "${flist[@]}"
             do
                 IFS=$'\t' read wjid stat bt <<< $(echo "$f" | jq -r '.["wjid"], .["stat"], .["bt"]' | tr '\n' '\t')
-                if ([ ! "$4" ] && [ "$stat" == "1" ]) || [ "$(echo "$bt" | grep -E "$4")" ]; then downloadfile $wjid "$bdir/$kcm/$flm"; fi
+                if ([ ! "$4" ] && [ "$stat" == "1" ]) || ([ "$4" ] && [ "$(echo "$bt" | grep -E "$4")" ]); then downloadfile $wjid "$bdir/$kcm/$flm"; fi
             done
         done
     done
