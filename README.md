@@ -1,6 +1,6 @@
 ## wlxt
 
-A shell script for linux to mimic part of the behaviour of learn.tsinghua.edu.cn. You need to download nodejs for encrypting your password. Make sure the command `jq` is available.
+A shell script for linux to mimic part of the behaviour of learn.tsinghua.edu.cn. You need to have `nodejs` for encrypting your password, and `python3` for unescaping html characters. Make sure the command `jq` is available.
 ```bash
     sudo apt install nodejs jq
 ```

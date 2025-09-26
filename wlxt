@@ -307,7 +307,7 @@ elif [ "$1" == "xzzy" ]; then
                 exit 1
             fi
             cd "$4"
-            curl -w 'Downloading '"$4"'/%{filename_effective}...\n' -s $url -b $Cookie -J -O
+            curl -w 'Downloaded '"$4"'/%{filename_effective}...\n' -s $url -b $Cookie -J -O
             cd - > /dev/null
         fi
     }
@@ -339,15 +339,12 @@ elif [ "$1" == "ckzy" ]; then
     echo "To ensure correct behavior, use 'wlxt refresh' before viewing."
     findCourse "$2"
     if [ ${#clist[@]} != 1 ]; then echo "You can only view one homework at a time."; exit 1; fi
-    IFS=$'\t' read zyid xszyid <<< $(echo "$Homework" | jq -r '.["'$clist'"][][] | select(.["wz"]=='$3') | (.["zyid"], .["xszyid"])' 2> /dev/null | tr '\n' '\t')
+    zyid=$(echo "$Homework" | jq -r '.["'$clist'"][][] | select(.["wz"]=='$3') | .["zyid"]' 2> /dev/null)
     if [ ! "$zyid" ]; then echo "Invalid homework number: "$3; exit 1; fi
     Tmp="$dir"/temp
     echo -e '\nInstructions:\n'
     getCookie
-    curl -s "https://learn.tsinghua.edu.cn/f/wlxt/kczy/zy/student/viewTj?wlkcid=$clist&zyid=$zyid&xszyid=$xszyid&sfgq=0" -b $Cookie > "$Tmp"
-    IFS=$'\t' read l r <<< $(cat "$Tmp" | awk '/<!--作业说明-->|<!--作业附件-->/{print NR}' | head -n2 | tr '\n' '\t')
-    cat "$Tmp" | sed -n "$(($l+4)),$(($r-3)) p" | tr '\n' ' ' | sed -E 's/ *(<[^>]*> *)+/\n/g' | python3 -c "import sys, html; print(html.unescape(sys.stdin.read()), end='')" | sed '/^\s*$/d'
-    rm -f "$Tmp"
+    curl -s "https://learn.tsinghua.edu.cn/b/wlxt/kczy/zy/student/detail?_csrf=$xsrf" -b $Cookie -d id=$zyid | jq -r '.["msg"]'  | python3 -c "import sys, html; print(html.unescape(html.unescape(sys.stdin.read())), end='')" | tr '\n' ' ' | sed -E 's/ *(<[^>]*> *)+/\n/g' | sed '/^\s*$/d'
     echo ''
 elif [ "$1" == "tjzy" ]; then
     if [ $# != 3 ]; then
