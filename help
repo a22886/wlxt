@@ -4,17 +4,18 @@ Supported commands:
 
     help    - Show this help page.
     
-    config  - Basic settings. Use 'wlxt config show' to see your config.
-              Takes arguments <key> <value>. You can also use 'wlxt config surnames'
-              to set your personal surnames (maybe abbreviations) for your courses.
+    config  - Basic settings. Use 'wlxt config show' to see your configurations, 
+              and 'wlxt config delete' to delete all of them.
+              Takes arguments <key> <value>. You can also use 'wlxt config alias'
+              to set your personal alias (maybe abbreviations) for your courses.
 
-    kc      - List all courses with your surnames.
+    kc      - List all courses with your alias.
 
     zy      - List all homework. Takes arguments <course_name> <mode> [-f].
               List in format like 
                     未交: <course_name>: <hw_number> title <deadline> <grade>
               The course name can be its course id, its course name (both Chinese 
-              or English), or your surname; supports regular expressions for surnames.
+              or English), or your alias; supports regular expressions for alias.
               You have to quote the regular expressions to avoid shell automatically 
               expanding wildcards like *.
               Mode can only be an integer from 0 to 7, whose binary digits represent

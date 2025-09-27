@@ -83,8 +83,8 @@ function getCourse(){
         do
             kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
             ywkcm=$(echo "$Courses" | jq -r '.["'$id'"]["ywkcm"]')
-            surname=$(cat "$Config" | jq -r '.["surnames"]["'$id'"] // empty')
-            if [ "$1" == "$kcm" ] || [ "$1" == "$ywkcm" ] || [ "$(echo "$surname" | grep -E "$1")" ]; then
+            alias=$(cat "$Config" | jq -r '.["alias"]["'$id'"] // empty')
+            if [ "$1" == "$kcm" ] || [ "$1" == "$ywkcm" ] || [ "$(echo "$alias" | grep -E "$1")" ]; then
                 clist[$i]=$id
                 i=$((i+1))
             fi
@@ -161,15 +161,20 @@ function getFiles(){
 
 if [ "$1" == "config" ]; then
     if [ "$2" == "show" ] && [ ! "$3" ]; then
-        echo -e "Warning: this operation only outputs the file $Config without caring about its contents.\nThe config file should contain the keys \"finger\", \"id\", \"password\", \"semester\".\nIt may contain your surnames for your courses."
+        echo -e "Warning: this operation only outputs the file $Config without caring about its contents.\nThe config file should contain the keys \"finger\", \"id\", \"password\", \"semester\".\nIt may contain your alias for your courses."
         if [ ! -f "$Config" ]; then
             echo "Config file doesn't exist. Use wlxt config <key> <value>."
             exit 1
         fi
         cat "$Config"
-    elif [ "$2" != "surnames" ]; then
+    elif [ "$2" == "delete" ] && [ ! "$3" ]; then
+        echo -n "Do you really want to delete all of your current configurations? [y/n]: "
+        read y
+        if [ "$y" == "y" ]; then rm "$Config";
+        else echo "Aborted."; fi
+    elif [ "$2" != "alias" ]; then
         if [ "$4" ] || [ ! "$3" ]; then
-            echo "Usage: wlxt config <key> <value>; wlxt config surnames; wlxt config show"
+            echo "Usage: wlxt config <key> <value>; wlxt config alias/delete/show"
             exit 1
         fi
         # check if $Config is a valid json object
@@ -179,7 +184,7 @@ if [ "$1" == "config" ]; then
             echo "{}" > "$Config"
         fi
         if [ "$2" != "id" ] && [ "$2" != "password" ] && [ "$2" != "semester" ] && [ "$2" != "finger" ]; then
-            echo -e "There are only five valid keys (for now): id, password, semester, finger, surnames.\n\nThe first two corresponds to your account, the value for the third should be something \nlike 2024-2025-2 (in which the last digit 1 for autumn, 2 for spring, and 3 for summer \nsemesters), the fourth for (disguising as) double authenticating. \n\nUse 'wlxt config surnames' to set the fifth."
+            echo -e "There are only five valid keys (for now): id, password, semester, finger, alias.\n\nThe first two corresponds to your account, the value for the third should be something \nlike 2024-2025-2 (in which the last digit 1 for autumn, 2 for spring, and 3 for summer \nsemesters), the fourth for (disguising as) double authenticating. \n\nUse 'wlxt config alias' to set the fifth."
             exit 1
         fi
         if [ "$2" == "semester" ] && [ ! $(echo $3 | grep -E '^[0-9]{4}-[0-9]{4}-[1-3]$') ]; then
@@ -192,24 +197,24 @@ if [ "$1" == "config" ]; then
         rm -f "$CachedCourses" "$CachedHomework" "$CachedFiles" "$Cookie"
     else
         if [ "$3" ]; then
-            echo "Use wlxt config surnames."
+            echo "Use wlxt config alias."
             exit 1
         fi
         getCourse
         echo -e "Enter nothing for no change, enter 'delete' to delete, enter 'stop' to stop.\nWarning: characters after a space will be ignored."
-        # cat "$Config" | jq 'setpath(["surnames"];{})' > "$Config".temp && mv "$Config".temp "$Config"
+        # cat "$Config" | jq 'setpath(["alias"];{})' > "$Config".temp && mv "$Config".temp "$Config"
         for id in "${idlist[@]}"
         do
             kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
-            echo -n "Please enter your surname for the course $kcm:"
-            read surname
-            surname=$(echo "$surname" | awk '{print $1}')
-            if [ "$surname" == "delete" ]; then
-                cat "$Config" | jq 'del(.["surnames"]["'$id'"])' > "$Config".temp && mv "$Config".temp "$Config"
-            elif [ "$surname" == "stop" ]; then
+            echo -n "Please enter your alias for the course $kcm:"
+            read alias
+            alias=$(echo "$alias" | awk '{print $1}')
+            if [ "$alias" == "delete" ]; then
+                cat "$Config" | jq 'del(.["alias"]["'$id'"])' > "$Config".temp && mv "$Config".temp "$Config"
+            elif [ "$alias" == "stop" ]; then
                 break
-            elif [ "$surname" ]; then
-                cat "$Config" | jq 'setpath(["surnames","'$id'"];"'$surname'")' > "$Config".temp && mv "$Config".temp "$Config"
+            elif [ "$alias" ]; then
+                cat "$Config" | jq 'setpath(["alias","'$id'"];"'$alias'")' > "$Config".temp && mv "$Config".temp "$Config"
             fi
             i=$((i+1))
         done
@@ -224,11 +229,11 @@ elif [ "$1" == "kc" ]; then
     getCourse
     for id in "${idlist[@]}"
     do
-        surname=$(cat "$Config" | jq -r '.["surnames"]["'$id'"]')
+        alias=$(cat "$Config" | jq -r '.["alias"]["'$id'"]')
         kcm=$(echo "$Courses" | jq -r '.["'$id'"]["kcm"]')
         # Chinese character formatting issues
         fm=$((30-$(echo "$kcm" | wc -L)+$(echo "$kcm" | wc -c)))
-        printf "%-25s%-10s%-*s\n" $id $surname $fm "$kcm"
+        printf "%-25s%-10s%-*s\n" $id $alias $fm "$kcm"
     done
 elif [ "$1" == "zy" ]; then
     if [ $# -lt 3 ] || [ $# -gt 4 ] || ([ "$4" ] && [ "$4" != "-f" ]); then 
