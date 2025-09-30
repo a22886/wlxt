@@ -32,7 +32,7 @@ function getCookie(){
         exit 1
     fi
     
-    ping -w 1 -c 1 101.6.15.67 > /dev/null 2> /dev/null
+    curl learn.tsinghua.edu.cn -m 1 > /dev/null 2> /dev/null
     if [ $? != 0 ]; then echo "Cannot connect to learn.tsinghua.edu.cn. Please check your internet connection."; exit 1; fi
 
     if [ ! -f "$Cookie" ] || [ $(date +%s) -gt $(awk '$6=="XSRF-TOKEN"{print $5-120}' "$Cookie" ) ]; then
@@ -259,7 +259,7 @@ elif [ "$1" == "zy" ]; then
                 fm=$((30-$(echo "$msg" | wc -L)+$(echo "$msg" | wc -c)))
                 IFS=$'\t' read wz bt jzsj cj <<< $(echo "$hw" | jq -r '.["wz"], .["bt"], .["jzsjStr"], .["cj"] //empty' | tr '\n' '\t')
                 fmbt=$((30-$(echo "$bt" | wc -L)+$(echo "$bt" | wc -c)))
-                printf "%-*s%-*s%2s %-*s%-20s%-2s\n" $fms "$statmsg" $fm "$msg" $wz $fmbt "$bt" "$jzsj" "$cj"
+                printf "%-*s%-*s%3s %-*s%-20s%-2s\n" $fms "$statmsg" $fm "$msg" $wz $fmbt "$bt" "$jzsj" "$cj"
                 # output msg only on the first line
                 msg=
                 statmsg=
