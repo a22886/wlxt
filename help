@@ -45,6 +45,6 @@ Supported commands:
               title argument is not specified, then it will download all *new* files. 
               The title argument also supports regular expressions.
 
-    refresh - Deletes cache. Takes arguments 'courses', 'homework', 'files', or none.
+    refresh - Deletes all cache, including cookies. 
 
 For security reasons, the permission for any relevant file is set to rw-------.
